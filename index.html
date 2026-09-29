@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocAgent 企业知识智能体</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+<script src="https://unpkg.com/element-plus"></script>
+<script src="https://unpkg.com/marked/marked.min.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f5f7fa; }
+#app { height:100vh; }
+.layout { height:100vh; }
+.header { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; padding:0 24px; display:flex; align-items:center; justify-content:space-between; }
+.header h1 { font-size:20px; font-weight:600; }
+.header .subtitle { font-size:12px; opacity:0.9; }
+.sidebar { background:white; border-right:1px solid #e4e7ed; }
+.sidebar-header { padding:16px; border-bottom:1px solid #e4e7ed; display:flex; justify-content:space-between; align-items:center; }
+.sidebar-header h3 { font-size:16px; }
+.kb-list { padding:8px; }
+.kb-item { padding:12px; margin-bottom:8px; border-radius:8px; cursor:pointer; transition:all 0.2s; display:flex; justify-content:space-between; align-items:center; }
+.kb-item:hover { background:#f0f2f5; }
+.kb-item.active { background:#ecf5ff; border:1px solid #409eff; }
+.kb-item .left .name { font-weight:500; margin-bottom:4px; }
+.kb-item .left .meta { font-size:12px; color:#909399; }
+.kb-item .del-btn { opacity:0; transition:opacity 0.2s; color:#f56c6c; cursor:pointer; font-size:18px; flex-shrink:0; }
+.kb-item:hover .del-btn { opacity:1; }
+.doc-area { padding:16px; }
+.doc-item { padding:10px; border-radius:6px; margin-bottom:6px; background:#f9fafc; display:flex; justify-content:space-between; align-items:center; }
+.doc-item .name { font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px; }
+.chat-area { display:flex; flex-direction:column; height:100%; background:#f5f7fa; }
+.chat-header { padding:16px 24px; background:white; border-bottom:1px solid #e4e7ed; display:flex; justify-content:space-between; align-items:center; }
+.chat-header .title { font-size:16px; font-weight:500; }
+.chat-messages { flex:1; padding:24px; overflow-y:auto; }
+.msg { margin-bottom:20px; display:flex; }
+.msg.user { justify-content:flex-end; }
+.msg .avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+.msg.user .avatar { background:#409eff; color:white; margin-left:10px; }
+.msg.ai .avatar { background:#67c23a; color:white; margin-right:10px; }
+.msg .bubble { max-width:70%; padding:12px 16px; border-radius:12px; line-height:1.6; }
+.msg.user .bubble { background:#409eff; color:white; border-top-right-radius:4px; }
+.msg.ai .bubble { background:white; border:1px solid #e4e7ed; border-top-left-radius:4px; }
+.msg.ai .bubble p { margin-bottom:8px; }
+.msg.ai .bubble p:last-child { margin-bottom:0; }
+.msg.ai .bubble ul,.msg.ai .bubble ol { padding-left:20px; margin-bottom:8px; }
+.msg.ai .bubble code { background:#f5f7fa; padding:2px 6px; border-radius:4px; font-size:13px; }
+.sources { margin-top:10px; padding-top:10px; border-top:1px dashed #e4e7ed; }
+.sources-title { font-size:12px; color:#909399; margin-bottom:6px; }
+.source-tag { display:inline-block; font-size:11px; padding:2px 8px; background:#ecf5ff; color:#409eff; border-radius:10px; margin-right:6px; margin-bottom:4px; }
+.chat-input-area { padding:16px 24px; background:white; border-top:1px solid #e4e7ed; }
+.input-row { display:flex; gap:10px; }
+.input-row .el-input { flex:1; }
+.empty-state { text-align:center; padding:100px 20px; color:#909399; }
+.empty-state .icon { font-size:64px; margin-bottom:16px; }
+.back-btn { cursor:pointer; color:#909399; margin-right:12px; }
+.back-btn:hover { color:#409eff; }
+.think-dots span { animation:blink 1.4s infinite; }
+.think-dots span:nth-child(2) { animation-delay:0.2s; }
+.think-dots span:nth-child(3) { animation-delay:0.4s; }
+@keyframes blink { 0%,100%{opacity:0.2;} 50%{opacity:1;} }
+</style>
+</head>
+<body>
+
+<div id="app">
+<el-container class="layout">
+<el-header class="header" height="60px">
+<div><h1>DocAgent 企业知识智能体</h1><div class="subtitle">基于 RAG 的智能文档问答系统</div></div>
+<el-tag type="success" effect="dark">本地部署 · 数据安全</el-tag>
+</el-header>
+<el-container>
+<el-aside class="sidebar" width="280px">
+<div class="sidebar-header"><h3>知识库</h3><el-button type="primary" size="small" @click="showCreate = true" round>+ 新建</el-button></div>
+<div class="kb-list">
+<div v-for="kb in kbList" :key="kb.id" class="kb-item" :class="{active: currentKbId === kb.id}" @click="enterKb(kb.id)">
+<div class="left"><div class="name">{{ kb.name }}</div><div class="meta">{{ kb.doc_count }} 篇文档 · {{ kb.created_at }}</div></div>
+<span class="del-btn" @click.stop="deleteKb(kb.id, kb.name)">✕</span>
+</div>
+<el-empty v-if="kbList.length === 0" description="暂无知识库" :image-size="80" />
+</div>
+</el-aside>
+<el-main style="padding:0; height:calc(100vh - 60px);">
+<div v-if="!currentKbId" class="empty-state">
+<div class="icon">📄</div><h2>欢迎使用 DocAgent</h2>
+<p style="margin-top:10px;">选择或创建一个知识库，上传文档后即可开始智能问答</p>
+<el-button type="primary" size="large" style="margin-top:20px;" @click="showCreate = true" round>创建第一个知识库</el-button>
+</div>
+<el-container v-else style="height:100%;">
+<el-aside width="260px" style="background:white; border-right:1px solid #e4e7ed;">
+<div class="sidebar-header"><span class="back-btn" @click="backHome">← 返回</span></div>
+<div class="doc-area">
+<div style="margin-bottom:12px;">
+<el-upload :action="uploadUrl" :show-file-list="false" :on-success="onUploadSuccess" :on-error="onUploadError" :before-upload="beforeUpload">
+<el-button type="primary" size="small" style="width:100%;" :loading="uploading">上传文档</el-button>
+</el-upload>
+</div>
+<div class="doc-item" v-for="doc in docList" :key="doc.id"><span class="name">{{ doc.name }}</span><el-tag size="small" type="success">完成</el-tag></div>
+<el-empty v-if="docList.length === 0" description="暂无文档" :image-size="60" />
+</div>
+<div style="padding:16px;"><el-button type="warning" size="small" style="width:100%;" @click="doSummarize" :loading="summarizing">一键总结</el-button></div>
+</el-aside>
+<div class="chat-area">
+<div class="chat-header"><span class="title">智能问答</span><el-button size="small" @click="clearChat">清空对话</el-button></div>
+<div class="chat-messages" ref="msgRef">
+<div v-if="messages.length === 0" style="text-align:center; padding:60px 20px; color:#909399;">
+<div style="font-size:48px; margin-bottom:12px;">💡</div><p>上传文档后，就可以开始提问了</p>
+<p style="font-size:12px; margin-top:8px;">试试问：这份文档主要讲了什么？</p>
+</div>
+<div v-for="(msg, i) in messages" :key="i" class="msg" :class="msg.role">
+<div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
+<div class="bubble">
+<div v-if="msg.role === 'ai'" v-html="renderMd(msg.content)"></div>
+<div v-else style="white-space:pre-wrap;">{{ msg.content }}</div>
+<div v-if="msg.sources && msg.sources.length" class="sources">
+<div class="sources-title">参考来源：</div>
+<span v-for="(s, si) in msg.sources" :key="si" class="source-tag" :title="s.content">{{ s.doc_name }} ({{ s.score }}%)</span>
+</div>
+</div>
+</div>
+<div v-if="loading" class="msg ai"><div class="avatar">🤖</div><div class="bubble"><div class="think-dots">思考中<span>.</span><span>.</span><span>.</span></div></div></div>
+</div>
+<div class="chat-input-area">
+<div class="input-row">
+<el-input v-model="inputText" placeholder="输入你的问题，Enter 发送" @keyup.enter="sendMessage" :disabled="loading" />
+<el-button type="primary" @click="sendMessage" :disabled="loading || !inputText.trim()">发送</el-button>
+</div>
+<div style="font-size:12px; color:#c0c4cc; margin-top:8px; text-align:center;">DocAgent 会基于知识库内容回答问题，答案仅供参考</div>
+</div>
+</div>
+</el-container>
+</el-main>
+</el-container>
+</el-container>
+<el-dialog v-model="showCreate" title="新建知识库" width="400px">
+<el-form :model="newKbForm" label-width="80px">
+<el-form-item label="名称"><el-input v-model="newKbForm.name" placeholder="请输入知识库名称" /></el-form-item>
+<el-form-item label="描述"><el-input v-model="newKbForm.description" type="textarea" :rows="3" placeholder="请输入描述（可选）" /></el-form-item>
+</el-form>
+<template #footer><el-button @click="showCreate = false">取消</el-button><el-button type="primary" @click="createKb" :loading="creating">创建</el-button></template>
+</el-dialog>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+const App = {
+  setup() {
+    const API = 'http://localhost:8000/api';
+    const kbList = ref([]);
+    const currentKbId = ref(null);
+    const docList = ref([]);
+    const messages = ref([]);
+    const inputText = ref('');
+    const loading = ref(false);
+    const summarizing = ref(false);
+    const uploading = ref(false);
+    const showCreate = ref(false);
+    const creating = ref(false);
+    const newKbForm = ref({ name: '', description: '' });
+    const msgRef = ref(null);
+
+    const uploadUrl = computed(() => `${API}/knowledge-bases/${currentKbId.value}/documents`);
+
+    function renderMd(text) {
+      if (!text) return '';
+      try { return marked.parse(text); } catch(e) { return text; }
+    }
+
+    function scrollBottom() {
+      nextTick(() => {
+        if (msgRef.value) msgRef.value.scrollTop = msgRef.value.scrollHeight;
+      });
+    }
+
+    async function apiGet(url) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function apiPost(url, body) {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {})
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function apiDelete(url) {
+      const r = await fetch(url, { method: 'DELETE' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function apiPostForm(url, formData) {
+      const r = await fetch(url, { method: 'POST', body: formData });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }
+
+    async function fetchKbList() {
+      try {
+        kbList.value = await apiGet(`${API}/knowledge-bases`);
+      } catch (e) {
+        ElementPlus.ElMessage.error('获取列表失败');
+      }
+    }
+
+    async function createKb() {
+      if (!newKbForm.value.name.trim()) {
+        ElementPlus.ElMessage.warning('请输入名称');
+        return;
+      }
+      creating.value = true;
+      try {
+        const form = new FormData();
+        form.append('name', newKbForm.value.name);
+        form.append('description', newKbForm.value.description);
+        await apiPostForm(`${API}/knowledge-bases`, form);
+        ElementPlus.ElMessage.success('创建成功');
+        showCreate.value = false;
+        newKbForm.value = { name: '', description: '' };
+        await fetchKbList();
+      } catch (e) {
+        ElementPlus.ElMessage.error('创建失败');
+      } finally {
+        creating.value = false;
+      }
+    }
+
+    async function deleteKb(id, name) {
+      try {
+        await ElementPlus.ElMessageBox.confirm(
+          `确定删除知识库「${name}」吗？此操作不可恢复。`,
+          '删除确认',
+          { confirmButtonText: '确定删除', cancelButtonText: '取消', type: 'warning' }
+        );
+      } catch (e) {
+        return;
+      }
+      try {
+        await apiDelete(`${API}/knowledge-bases/${id}`);
+        ElementPlus.ElMessage.success('删除成功');
+        if (currentKbId.value === id) {
+          currentKbId.value = null;
+          messages.value = [];
+        }
+        await fetchKbList();
+      } catch (e) {
+        ElementPlus.ElMessage.error('删除失败');
+      }
+    }
+
+    function backHome() {
+      currentKbId.value = null;
+      messages.value = [];
+    }
+
+    async function enterKb(id) {
+      currentKbId.value = id;
+      messages.value = [];
+      await fetchDocList();
+    }
+
+    async function fetchDocList() {
+      try {
+        docList.value = await apiGet(`${API}/knowledge-bases/${currentKbId.value}/documents`);
+      } catch (e) {}
+    }
+
+    function beforeUpload() {
+      uploading.value = true;
+      return true;
+    }
+
+    function onUploadSuccess(res) {
+      uploading.value = false;
+      ElementPlus.ElMessage.success('上传成功');
+      fetchDocList();
+    }
+
+    function onUploadError(err) {
+      uploading.value = false;
+      ElementPlus.ElMessage.error('上传失败');
+    }
+
+    async function sendMessage() {
+      if (!inputText.value.trim() || loading.value) return;
+      const q = inputText.value.trim();
+      inputText.value = '';
+      messages.value = [...messages.value, { role: 'user', content: q }];
+      loading.value = true;
+      scrollBottom();
+
+      try {
+        const hist = messages.value.slice(0, -1).map(m => ({
+          role: m.role,
+          content: m.content
+        }));
+        const data = await apiPost(`${API}/chat`, {
+          kb_id: currentKbId.value,
+          question: q,
+          chat_history: hist
+        });
+        messages.value = [...messages.value, {
+          role: 'ai',
+          content: data.answer || '无回答',
+          sources: data.sources || []
+        }];
+      } catch (e) {
+        messages.value = [...messages.value, {
+          role: 'ai',
+          content: '抱歉，回答出错了：' + e.message
+        }];
+      } finally {
+        loading.value = false;
+        scrollBottom();
+      }
+    }
+
+    async function doSummarize() {
+      summarizing.value = true;
+      try {
+        const data = await apiPost(`${API}/knowledge-bases/${currentKbId.value}/summarize`, {});
+        messages.value = [...messages.value, {
+          role: 'ai',
+          content: '## 知识库总结\n\n' + (data.summary || '无总结')
+        }];
+        scrollBottom();
+      } catch (e) {
+        ElementPlus.ElMessage.error('总结失败');
+      } finally {
+        summarizing.value = false;
+      }
+    }
+
+    function clearChat() {
+      messages.value = [];
+    }
+
+    onMounted(() => {
+      fetchKbList();
+    });
+
+    return {
+      kbList, currentKbId, docList, messages, inputText, loading,
+      summarizing, uploading, showCreate, creating, newKbForm, msgRef,
+      uploadUrl, renderMd, fetchKbList, createKb, deleteKb,
+      backHome, enterKb, fetchDocList, beforeUpload,
+      onUploadSuccess, onUploadError, sendMessage, doSummarize, clearChat
+    };
+  }
+};
+
+const app = createApp(App);
+app.use(ElementPlus);
+app.mount('#app');
+</script>
+</body>
+</html>
